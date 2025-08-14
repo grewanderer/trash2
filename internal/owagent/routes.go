@@ -8,4 +8,7 @@ func RegisterRoutes(r *mux.Router, h *Handler) {
 	sub.HandleFunc("/checksum/{uuid}/", h.Checksum).Methods("GET")
 	sub.HandleFunc("/download-config/{uuid}/", h.DownloadConfig).Methods("GET")
 	sub.HandleFunc("/report-status/{uuid}/", h.ReportStatus).Methods("POST")
+	sub.HandleFunc("/controller/report-status/{uuid}/", h.ReportStatus).Methods("POST")
+	sub.HandleFunc("/controller/report_status/{uuid}/", h.ReportStatus).Methods("POST")
+	sub.HandleFunc("/controller/download-config/{uuid}/", h.DownloadConfig).Methods("GET", "HEAD")
 }

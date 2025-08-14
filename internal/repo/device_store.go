@@ -173,18 +173,44 @@ func (s *DeviceStore) ReportStatus(ctx context.Context, uuid, key, status string
 	}
 	now := time.Now().UTC()
 	d.LastSeenAt = &now
+	d.LastReportedStatus = status
 
-	// Маппинг статуса агента -> наше enum-поле
-	switch status {
-	case "running", "ok", "applied":
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "online":
 		d.Status = models.DeviceStatusOnline
-	case "error", "failed":
+	case "ok", "applied", "success":
+		d.Status = models.DeviceStatusOnline
+	case "error", "failed", "offline":
 		d.Status = models.DeviceStatusOffline
 	default:
-		d.Status = models.DeviceStatusUnknown
+		d.Status = models.DeviceStatusOnline
 	}
-
 	return s.db.WithContext(ctx).Save(d).Error
+}
+
+func (s *DeviceStore) ReportApplied(ctx context.Context, uuid, key, localSum string) error {
+	d, err := s.ValidateKey(ctx, uuid, key)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if strings.TrimSpace(localSum) == "" {
+		localSum = d.ConfigChecksum
+	}
+	d.LastAppliedAt = &now
+	d.LastAppliedSum = localSum
+	d.Status = models.DeviceStatusOnline
+	return s.db.WithContext(ctx).Save(d).Error
+}
+
+func (s *DeviceStore) MarkSeen(ctx context.Context, uuid string) error {
+	now := time.Now().UTC()
+	return s.db.WithContext(ctx).Model(&models.Device{}).
+		Where("uuid = ?", uuid).
+		Updates(map[string]any{
+			"last_seen_at": now,
+			"status":       models.DeviceStatusOnline,
+		}).Error
 }
 
 // -------- Методы под owctrl-адаптер (без key) --------

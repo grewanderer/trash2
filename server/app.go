@@ -62,10 +62,22 @@ func (a *App) Initialize(cfg *config.Config) {
 			&models.ConfigTemplate{},
 			&models.CA{},
 			&models.Certificate{},
-			&models.WireGuardPeer{}); err != nil {
+			&models.WireGuardPeer{},
+			&models.DeviceSecret{}); err != nil {
 			log.Fatalf("db migrate failed: %v", err)
 		}
 	}
+
+	go func() {
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for range t.C {
+			cut := time.Now().Add(-5 * time.Minute)
+			a.db.Model(&models.Device{}).
+				Where("last_seen_at IS NOT NULL AND last_seen_at < ? AND status <> ?", cut, models.DeviceStatusOffline).
+				Update("status", models.DeviceStatusOffline)
+		}
+	}()
 
 	p := owctrl.NewMemKeyProvider(10 * time.Minute)
 	ds := repo.NewDeviceStore(a.db)

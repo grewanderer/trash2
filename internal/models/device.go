@@ -23,17 +23,20 @@ type Device struct {
 	Model string `gorm:"type:text"`
 	MAC   string `gorm:"type:text"`
 
-	Fingerprint     string         `gorm:"type:text"`
-	Tags            datatypes.JSON `gorm:"type:json"`
-	Status          DeviceStatus   `gorm:"type:text;default:'unknown'"`
-	LastSeenAt      *time.Time
-	ConfigArchive   []byte         // ← убрали gorm:"type:bytea" (MySQL не знает bytea)
-	Key             string         `gorm:"column:device_key;type:char(32);index"`
-	ConfigVersion   int            `gorm:"default:0"`
-	ConfigChecksum  string         `gorm:"type:text"`
-	DesiredConfig   datatypes.JSON `gorm:"type:json"`
-	RenderedConfig  datatypes.JSON `gorm:"type:json"`
-	ConfigUpdatedAt *time.Time
+	Fingerprint        string         `gorm:"type:text"`
+	Tags               datatypes.JSON `gorm:"type:json"`
+	Status             DeviceStatus   `gorm:"type:text;default:'unknown'"`
+	LastSeenAt         *time.Time
+	ConfigArchive      []byte         // ← убрали gorm:"type:bytea" (MySQL не знает bytea)
+	Key                string         `gorm:"column:device_key;type:char(32);index"`
+	ConfigVersion      int            `gorm:"default:0"`
+	ConfigChecksum     string         `gorm:"type:text"`
+	DesiredConfig      datatypes.JSON `gorm:"type:json"`
+	RenderedConfig     datatypes.JSON `gorm:"type:json"`
+	ConfigUpdatedAt    *time.Time
+	LastReportedStatus string `gorm:"type:text"`
+	LastAppliedAt      *time.Time
+	LastAppliedSum     string `gorm:"type:char(64)"` // sha256 sum, совпадает с выдаваемым checksum при download
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

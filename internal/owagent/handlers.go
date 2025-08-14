@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"wisp/internal/repo"
@@ -93,27 +95,25 @@ func (h *Handler) Checksum(w http.ResponseWriter, r *http.Request) {
 
 	sum, err := h.ds.GetChecksum(r.Context(), uuid, key)
 	if err != nil {
-		status := http.StatusInternalServerError
-		if err == repo.ErrUnauthorized || err == repo.ErrNotFound {
-			status = http.StatusNotFound
+		// различаем NotFound и Unauthorized
+		code := http.StatusInternalServerError
+		if errors.Is(err, repo.ErrNotFound) {
+			code = http.StatusNotFound // заставит агента регистрироваться
+		} else if errors.Is(err, repo.ErrUnauthorized) {
+			code = http.StatusNotFound // для агента тоже 404, чтобы уйти в register
 		}
-		http.Error(w, http.StatusText(status), status)
+		http.Error(w, http.StatusText(code), code)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = io.WriteString(w, sum+"\n")
+	_ = h.ds.MarkSeen(r.Context(), uuid) // ← засечём хартбит
 }
 
 // GET /controller/download-config/{uuid}/?key=...
 func (h *Handler) DownloadConfig(w http.ResponseWriter, r *http.Request) {
 	uuid := mux.Vars(r)["uuid"]
 	key := r.URL.Query().Get("key")
-
-	// Ленивый reconcile (best-effort)
-	if h.rec != nil {
-		_, _, _ = h.rec.Reconcile(r.Context(), uuid)
-	}
-
 	data, sum, err := h.ds.GetConfig(r.Context(), uuid, key)
 	if err != nil {
 		status := http.StatusInternalServerError
@@ -126,32 +126,63 @@ func (h *Handler) DownloadConfig(w http.ResponseWriter, r *http.Request) {
 	setOWHeader(w)
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s.tar.gz"`, uuid, sum[:8]))
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+	_ = h.ds.MarkSeen(r.Context(), uuid) // пульс online
 }
 
 // POST /controller/report-status/{uuid}/  body: key=...&status=running|error
 func (h *Handler) ReportStatus(w http.ResponseWriter, r *http.Request) {
 	setOWHeader(w)
+
+	// обязательно парсим форму до чтения значений
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
+
 	uuid := mux.Vars(r)["uuid"]
-	key := r.FormValue("key")
-	status := r.FormValue("status")
+	key := strings.TrimSpace(r.PostFormValue("key"))
+
+	status := strings.ToLower(strings.TrimSpace(r.PostFormValue("status")))
 	if status == "" {
 		status = "running"
 	}
+
+	// applied может прийти и отдельным флагом, и через status
+	appliedFlag := false
+	switch strings.ToLower(strings.TrimSpace(r.PostFormValue("applied"))) {
+	case "1", "true", "yes":
+		appliedFlag = true
+	}
+	if status == "ok" || status == "applied" || status == "success" {
+		appliedFlag = true
+	}
+
+	localSum := strings.TrimSpace(r.PostFormValue("checksum")) // если агент пришлёт
+
+	// обновим last_seen + статус/last_reported_status
 	if err := h.ds.ReportStatus(r.Context(), uuid, key, status); err != nil {
 		code := http.StatusInternalServerError
-		if err == repo.ErrUnauthorized {
-			code = http.StatusUnauthorized
+		switch err {
+		case repo.ErrUnauthorized, repo.ErrNotFound:
+			code = http.StatusNotFound
 		}
 		http.Error(w, http.StatusText(code), code)
 		return
 	}
-	// 200 OK без тела — агент проверяет статус-строку и X-Openwisp-Controller
+
+	// если применилось — зафиксируем время и какую сумму агент применил
+	if appliedFlag {
+		// не рушим ответ, если не получилось — агенту всё равно нужен 200
+		_ = h.ds.ReportApplied(r.Context(), uuid, key, localSum)
+	}
+
+	// 200 OK без тела — это норма для openwisp-config
 	w.WriteHeader(http.StatusOK)
 }
 

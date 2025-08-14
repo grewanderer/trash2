@@ -7,14 +7,15 @@ import (
 	"strings"
 )
 
-type File struct {
-	Path string
-	Mode int64
-	Data []byte
-}
-
 type Options struct {
 	DeviceHostname string
+}
+
+// File — тип, который RenderAll собирает в []File и передаёт в tarball.Build
+type File struct {
+	Name string // путь внутри tar: "etc/config/system"
+	Data []byte
+	Mode int // 0644 и т.п.; если твоему tarball не нужен — можно оставить 0
 }
 
 // RenderAll — рендерит UCI-файлы из NetJSON.
@@ -75,16 +76,26 @@ func lst(b *strings.Builder, k, v string) {
 }
 
 // ===== system =====
-func renderSystem(nj map[string]any, opts Options) *File {
-	sys, _ := asMap(nj["system"])
-	if sys == nil && opts.DeviceHostname == "" {
-		return nil
+func renderSystem(nj map[string]any, opt Options) *File {
+	// приоритет: NetJSON > опция > дефолт
+	hn := strAt(nj, "system", "hostname")
+	if hn == "" {
+		hn = opt.DeviceHostname
 	}
-	var b strings.Builder
-	addLine(&b, "config system\n")
-	host := getString(sys, "hostname", opts.DeviceHostname)
-	opt(&b, "hostname", host)
-	return &File{Path: "etc/config/system", Mode: 0644, Data: []byte(b.String())}
+	if hn == "" {
+		hn = "OpenWrt"
+	}
+
+	content := fmt.Sprintf(
+		"config system\n\toption hostname '%s'\n",
+		hn,
+	)
+
+	return &File{
+		Name: "etc/config/system",
+		Data: []byte(content),
+		Mode: 0644,
+	}
 }
 
 // ===== network =====
@@ -117,7 +128,8 @@ func renderNetwork(nj map[string]any) *File {
 		optBool(&b, "disabled", getBool(m, "disabled", false))
 		addLine(&b, "\n")
 	}
-	return &File{Path: "etc/config/network", Mode: 0644, Data: []byte(b.String())}
+	return &File{Name: "etc/config/network", Mode: 0644, Data: []byte(b.String())}
+
 }
 
 // ===== wireless =====
@@ -158,7 +170,7 @@ func renderWireless(nj map[string]any) *File {
 		optBool(&b, "disabled", getBool(m, "disabled", false))
 		addLine(&b, "\n")
 	}
-	return &File{Path: "etc/config/wireless", Mode: 0644, Data: []byte(b.String())}
+	return &File{Name: "etc/config/wireless", Mode: 0644, Data: []byte(b.String())}
 }
 
 // ===== dhcp =====
@@ -186,7 +198,7 @@ func renderDHCP(nj map[string]any) *File {
 		opt(&b, "leasetime", getString(m, "leasetime", "12h"))
 		addLine(&b, "\n")
 	}
-	return &File{Path: "etc/config/dhcp", Mode: 0644, Data: []byte(b.String())}
+	return &File{Name: "etc/config/dhcp", Mode: 0644, Data: []byte(b.String())}
 }
 
 // ===== firewall =====
@@ -231,7 +243,8 @@ func renderFirewall(nj map[string]any) *File {
 		}
 		addLine(&b, "\n")
 	}
-	return &File{Path: "etc/config/firewall", Mode: 0644, Data: []byte(b.String())}
+	return &File{Name: "etc/config/firewall", Mode: 0644, Data: []byte(b.String())}
+
 }
 
 // ===== WireGuard =====
@@ -270,7 +283,7 @@ func renderWireGuard(nj map[string]any) *File {
 		}
 		addLine(&b, "\n")
 	}
-	return &File{Path: "etc/config/network", Mode: 0644, Data: []byte(b.String())}
+	return &File{Name: "etc/config/network", Mode: 0644, Data: []byte(b.String())}
 }
 
 // ===== OpenVPN =====
@@ -299,7 +312,7 @@ func renderOpenVPN(nj map[string]any) *File {
 		}
 		addLine(&b, "\n")
 	}
-	return &File{Path: "etc/config/openvpn", Mode: 0644, Data: []byte(b.String())}
+	return &File{Name: "etc/config/openvpn", Mode: 0644, Data: []byte(b.String())}
 }
 
 // ===== ZeroTier =====
@@ -316,24 +329,26 @@ func renderZeroTier(nj map[string]any) *File {
 		lst(&b, "join", fmt.Sprint(n))
 	}
 	addLine(&b, "\n")
-	return &File{Path: "etc/config/zerotier", Mode: 0644, Data: []byte(b.String())}
+	return &File{Name: "etc/config/zerotier", Mode: 0644, Data: []byte(b.String())}
 }
 
 // ===== small helpers =====
 func asMap(v any) (map[string]any, bool) { m, ok := v.(map[string]any); return m, ok }
 func asSlice(v any) ([]any, bool)        { s, ok := v.([]any); return s, ok }
 
-func getString(m map[string]any, k, def string) string {
-	if m == nil {
-		return def
-	}
-	if v, ok := m[k]; ok {
-		if s, ok := v.(string); ok {
-			return s
+func getString(m map[string]any, path ...string) string {
+	cur := any(m)
+	for _, p := range path {
+		obj, _ := cur.(map[string]any)
+		if obj == nil {
+			return ""
 		}
+		cur = obj[p]
 	}
-	return def
+	s, _ := cur.(string)
+	return s
 }
+
 func getBool(m map[string]any, k string, def bool) bool {
 	if m == nil {
 		return def
@@ -367,4 +382,20 @@ func getInt(m map[string]any, k string, def int) int {
 		}
 	}
 	return def
+}
+
+// strAt — безопасно достаёт строку из вложенной map[string]any по пути ключей
+func strAt(m map[string]any, keys ...string) string {
+	cur := any(m)
+	for _, k := range keys {
+		obj, ok := cur.(map[string]any)
+		if !ok {
+			return ""
+		}
+		cur = obj[k]
+	}
+	if s, ok := cur.(string); ok {
+		return s
+	}
+	return ""
 }

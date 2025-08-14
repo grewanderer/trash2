@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"io"
 	"net/http"
 	"strconv"
@@ -21,7 +20,7 @@ import (
 
 type Handler struct {
 	d Dependencies
-	t *template.Template
+	t pageTemplates // ← вместо *template.Template теперь наборы по страницам
 }
 
 func (h *Handler) redirect(path string) http.HandlerFunc {
@@ -30,9 +29,14 @@ func (h *Handler) redirect(path string) http.HandlerFunc {
 	}
 }
 
-func (h *Handler) render(w http.ResponseWriter, name string, data any) {
+func (h *Handler) render(w http.ResponseWriter, page string, data any) {
+	t, ok := h.t[page]
+	if !ok {
+		http.Error(w, "template not found: "+page, http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.t.ExecuteTemplate(w, name, data); err != nil {
+	if err := t.ExecuteTemplate(w, "layout", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
