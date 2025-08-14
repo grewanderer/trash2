@@ -1,56 +1,39 @@
 package server
 
 import (
+	"context"
+	"fmt"
+	"time"
+
 	"wisp/internal/owctrl"
 	"wisp/internal/repo"
 )
 
-/*━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━*
-|  ADAPTER: repo.DeviceStore -> owctrl.Store                    |
-*━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━*/
-
 type storeAdapter struct{ ds *repo.DeviceStore }
 
-func newStoreAdapter(ds *repo.DeviceStore) *storeAdapter { return &storeAdapter{ds: ds} }
+func newStoreAdapter(ds *repo.DeviceStore) owctrl.Store { return &storeAdapter{ds: ds} }
 
-var _ owctrl.Store = (*storeAdapter)(nil)
-
-func (s *storeAdapter) UpsertByKey(key string, d owctrl.DeviceFields) (owctrl.DeviceFields, bool) {
-	df, isNew := s.ds.UpsertByKey(key, repo.DeviceFields{
-		UUID:    d.UUID,
-		Key:     d.Key,
-		Name:    d.Name,
-		Backend: d.Backend,
-		MAC:     d.MAC,
-		Status:  d.Status,
+func (a *storeAdapter) Adopt(ctxCtx interface{ Done() <-chan struct{} }, in owctrl.AdoptRequest) (*owctrl.DeviceDTO, error) {
+	ctx, _ := ctxCtx.(context.Context)
+	dev, err := a.ds.Adopt(ctx, repo.AdoptInput{
+		UUID:        in.UUID,
+		Fingerprint: in.Fingerprint,
+		Metadata:    in.Metadata,
 	})
-	return owctrl.DeviceFields{
-		UUID:      df.UUID,
-		Key:       key, // ключ подтверждаем внешним аргументом
-		Name:      df.Name,
-		Backend:   df.Backend,
-		MAC:       df.MAC,
-		Status:    df.Status,
-		UpdatedAt: df.UpdatedAt,
-	}, isNew
-}
-
-func (s *storeAdapter) FindByUUID(id string) (owctrl.DeviceFields, bool) {
-	df, ok := s.ds.FindByUUID(id)
-	if !ok {
-		return owctrl.DeviceFields{}, false
+	if err != nil {
+		return nil, err
 	}
-	return owctrl.DeviceFields{
-		UUID:      df.UUID,
-		Key:       df.Key,
-		Name:      df.Name,
-		Backend:   df.Backend,
-		MAC:       df.MAC,
-		Status:    df.Status,
-		UpdatedAt: df.UpdatedAt,
-	}, true
+	return &owctrl.DeviceDTO{ID: toStringID(dev.ID), UUID: dev.UUID, Name: dev.Name}, nil
 }
 
-func (s *storeAdapter) UpdateStatus(id, status string) error {
-	return s.ds.UpdateStatus(id, status)
+func (a *storeAdapter) GetConfig(ctxCtx interface{ Done() <-chan struct{} }, uuid string) ([]byte, int, string, error) {
+	ctx, _ := ctxCtx.(context.Context)
+	return a.ds.GetConfigNoKey(ctx, uuid) // ← новое имя
 }
+
+func (a *storeAdapter) AckConfig(ctxCtx interface{ Done() <-chan struct{} }, uuid string, version int, checksum, status string, appliedAt time.Time) error {
+	ctx, _ := ctxCtx.(context.Context)
+	return a.ds.AckConfigOW(ctx, uuid, version, checksum, status, appliedAt) // ← новое имя
+}
+
+func toStringID(id uint) string { return fmt.Sprintf("%d", id) }

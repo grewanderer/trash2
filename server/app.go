@@ -58,6 +58,8 @@ func (a *App) Initialize(cfg *config.Config) {
 		}
 	}
 
+	p := owctrl.NewMemKeyProvider(10 * time.Minute)
+
 	/* 3) Router + middleware */
 	a.Router = mux.NewRouter().StrictSlash(true)
 	a.Router.Use(
@@ -77,7 +79,7 @@ func (a *App) Initialize(cfg *config.Config) {
 	if a.db != nil {
 		ds := repo.NewDeviceStore(a.db)
 		// Адаптер, реализующий интерфейс owctrl.Store поверх repo.DeviceStore
-		a.registerOWRoutesWithStore(newStoreAdapter(ds), a.cfg.OpenWISP.SharedSecret)
+		a.registerOWRoutesWithStore(newStoreAdapter(ds), a.cfg.OpenWISP.SharedSecret, p)
 	} else {
 		owctrl.RegisterRoutes(a.Router, a.cfg.OpenWISP.SharedSecret) // in-memory
 	}
@@ -94,8 +96,19 @@ func (a *App) Initialize(cfg *config.Config) {
 	})
 }
 
-func (a *App) registerOWRoutesWithStore(store owctrl.Store, secret string) {
-	owctrl.RegisterRoutesWithStore(a.Router, secret, store)
+func (a *App) registerOWRoutesWithStore(store owctrl.Store, sharedSecret string, kp owctrl.KeyProvider) {
+	h := owctrl.NewHandler(store)
+
+	// 1) Только adopt — через общий shared secret
+	adopt := a.Router.PathPrefix("/ow/api/v1").Subrouter()
+	adopt.Use(owctrl.SharedSecretAuth(sharedSecret))
+	adopt.HandleFunc("/devices/adopt", h.Adopt).Methods(http.MethodPost)
+
+	// 2) Конфиги — через HMAC (подписанный агентом)
+	cfg := a.Router.PathPrefix("/ow/api/v1").Subrouter()
+	cfg.Use(owctrl.HMACAuth(kp, 5*time.Minute))
+	cfg.HandleFunc("/devices/{uuid:[a-fA-F0-9\\-]{36}}/config", h.GetConfig).Methods(http.MethodGet)
+	cfg.HandleFunc("/devices/{uuid:[a-fA-F0-9\\-]{36}}/config/applied", h.AckConfig).Methods(http.MethodPost)
 }
 
 func (a *App) Run() error {

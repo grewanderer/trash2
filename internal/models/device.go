@@ -3,19 +3,38 @@ package models
 import (
 	"time"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
-type Device struct {
-	ID        uint           `gorm:"primaryKey" json:"id"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+type DeviceStatus string
 
-	UUID      string `gorm:"uniqueIndex;size:64;not null" json:"uuid"`
-	DeviceKey string `gorm:"index;size:255;not null" json:"device_key"`
-	Name      string `gorm:"size:255" json:"name"`
-	Backend   string `gorm:"size:255" json:"backend"`
-	MAC       string `gorm:"size:64"  json:"mac"`
-	Status    string `gorm:"size:64"  json:"status"`
+const (
+	DeviceStatusUnknown DeviceStatus = "unknown"
+	DeviceStatusOnline  DeviceStatus = "online"
+	DeviceStatusOffline DeviceStatus = "offline"
+)
+
+type Device struct {
+	ID              uint           `gorm:"primaryKey"`
+	UUID            string         `gorm:"type:uuid;uniqueIndex;not null"`
+	Name            string         `gorm:"type:text"`
+	OrgID           *uint          `gorm:"index"`
+	Model           string         `gorm:"type:text"`
+	MAC             string         `gorm:"type:text"`
+	Fingerprint     string         `gorm:"type:text"`
+	Tags            datatypes.JSON `gorm:"type:jsonb"`
+	Status          DeviceStatus   `gorm:"type:text;default:'unknown'"`
+	LastSeenAt      *time.Time
+	ConfigArchive   []byte         `gorm:"type:bytea"`
+	Key             string         `gorm:"type:char(32);index"`
+	ConfigVersion   int            `gorm:"default:0"`
+	ConfigChecksum  string         `gorm:"type:text"`
+	DesiredConfig   datatypes.JSON `gorm:"type:jsonb"`
+	RenderedConfig  datatypes.JSON `gorm:"type:jsonb"`
+	ConfigUpdatedAt *time.Time
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
 }
