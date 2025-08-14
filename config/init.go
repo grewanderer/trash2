@@ -20,6 +20,33 @@ type Config struct {
 
 	OpenWISP struct {
 		SharedSecret string `mapstructure:"shared_secret"` // секрет для агента
+		Controller   struct {
+			PKI struct {
+				CAName  string `mapstructure:"ca_name"`  // "OpenWISP CA"
+				CertTTL string `mapstructure:"cert_ctl"` // "8760h" (год)
+			} `mapstructure:"pki"`
+			MgmtVPN struct {
+				Mode      string `mapstructure:"mode"` // "wireguard"|"openvpn"|"zerotier"|"none"
+				WireGuard struct {
+					Endpoint        string   `mapstructure:"endpoint"`          // "vpn.example.com:51820"
+					ServerPublicKey string   `mapstructure:"server_public_key"` // публичный ключ сервера
+					AddressPoolCIDR string   `mapstructure:"address_pool_cidr"` // "10.10.0.0/24"
+					AllowedIPs      []string `mapstructure:"allowed_ip"`        // ["10.10.0.0/24"]
+					Keepalive       int      `mapstructure:"keepalive"`         // 25 (сек)
+				} `mapstructure:"wireguard"`
+				OpenVPN struct {
+					Remote string `mapstructure:"remote"` // "vpn.example.com"
+					Port   int    `mapstructure:"port"`   // 1194
+					Proto  string `mapstructure:"proto"`  // "udp"
+					Cipher string `mapstructure:"cipher"` // "AES-256-GCM"
+					Auth   string `mapstructure:"auth"`   // "SHA256"
+				} `mapstructure:"openvpn"`
+				ZeroTier struct {
+					NetworkID string
+					Token     string // опционально, если надо управляшка
+				} `mapstructure:"zerotier"`
+			}
+		} `mapstructure:"controller"`
 	} `mapstructure:"openwisp"`
 
 	Logging struct {

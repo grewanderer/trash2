@@ -12,12 +12,15 @@ import (
 	"time"
 
 	"wisp/config"
+	"wisp/internal/controller"
 	"wisp/internal/db"
 	"wisp/internal/health"
 	"wisp/internal/logs"
 	"wisp/internal/middleware"
 	"wisp/internal/models"
+	"wisp/internal/owagent"
 	"wisp/internal/owctrl"
+	"wisp/internal/pki"
 	"wisp/internal/repo"
 
 	"github.com/gorilla/mux"
@@ -53,12 +56,23 @@ func (a *App) Initialize(cfg *config.Config) {
 		a.db = d
 
 		// минимальная доменная модель — только устройство
-		if err := a.db.AutoMigrate(&models.Device{}); err != nil {
+		if err := a.db.AutoMigrate(&models.Device{},
+			&models.ConfigTemplate{},
+			&models.CA{},
+			&models.Certificate{},
+			&models.WireGuardPeer{}); err != nil {
 			log.Fatalf("db migrate failed: %v", err)
 		}
 	}
 
 	p := owctrl.NewMemKeyProvider(10 * time.Minute)
+	ds := repo.NewDeviceStore(a.db)
+	ts := repo.NewTemplateStore(a.db)
+	pkiStore := repo.NewPKIStore(a.db)
+	pkiSvc := pki.New(pkiStore)
+
+	rec := controller.NewReconciler(ds, ts, pkiSvc, a.cfg)
+	ow := owagent.New(ds, a.cfg.OpenWISP.SharedSecret, true, rec)
 
 	/* 3) Router + middleware */
 	a.Router = mux.NewRouter().StrictSlash(true)
@@ -74,6 +88,8 @@ func (a *App) Initialize(cfg *config.Config) {
 	} else {
 		health.RegisterRoutes(a.Router) // только /healthz
 	}
+
+	owagent.RegisterRoutes(a.Router, ow)
 
 	/* 5) OpenWISP controller */
 	if a.db != nil {

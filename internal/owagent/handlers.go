@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,14 +15,21 @@ import (
 	"github.com/gorilla/mux"
 )
 
+type Reconciler interface {
+	Reconcile(ctx context.Context, uuid string) (checksum string, updated bool, err error)
+}
+
+// Handler теперь держит ссылку на Reconciler
 type Handler struct {
 	ds            *repo.DeviceStore
+	rec           Reconciler // ← добавили
 	sharedSecret  string
 	consistentKey bool
 }
 
-func New(ds *repo.DeviceStore, sharedSecret string, consistentKey bool) *Handler {
-	return &Handler{ds: ds, sharedSecret: sharedSecret, consistentKey: consistentKey}
+// Конструктор теперь принимает rec
+func New(ds *repo.DeviceStore, sharedSecret string, consistentKey bool, rec Reconciler) *Handler {
+	return &Handler{ds: ds, sharedSecret: sharedSecret, consistentKey: consistentKey, rec: rec}
 }
 
 // Вспомогательно: обязателен заголовок для агента
@@ -40,7 +48,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		SharedSecret:   r.FormValue("secret"),
 		ExpectedSecret: h.sharedSecret,
 		Name:           r.FormValue("name"),
-		Model:          r.FormValue("backend"), // ← было Backend:, теперь Model:
+		Model:          r.FormValue("backend"), // ← Backend → Model
 		MAC:            r.FormValue("mac_address"),
 		KeyOptional:    r.FormValue("key"),
 		ConsistentKey:  h.consistentKey,
@@ -57,11 +65,14 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// 201 Created + плэйнтекст с полями (как читает агент)
+
+	// Сразу пробуем собрать первичный конфиг (best-effort)
+	if h.rec != nil {
+		_, _, _ = h.rec.Reconcile(r.Context(), res.UUID)
+	}
+
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(w, "uuid: %s\n", res.UUID)
-	fmt.Fprintf(w, "key: %s\n", res.Key)
-	fmt.Fprintf(w, "hostname: %s\n", res.Name)
+	fmt.Fprintf(w, "uuid: %s\nkey: %s\nhostname: %s\n", res.UUID, res.Key, res.Name)
 	if res.IsNew {
 		fmt.Fprintln(w, "is-new: 1")
 	} else {
@@ -74,24 +85,35 @@ func (h *Handler) Checksum(w http.ResponseWriter, r *http.Request) {
 	setOWHeader(w)
 	uuid := mux.Vars(r)["uuid"]
 	key := r.URL.Query().Get("key")
+
+	// Ленивый reconcile перед ответом (best-effort)
+	if h.rec != nil {
+		_, _, _ = h.rec.Reconcile(r.Context(), uuid)
+	}
+
 	sum, err := h.ds.GetChecksum(r.Context(), uuid, key)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if err == repo.ErrUnauthorized || err == repo.ErrNotFound {
-			status = http.StatusNotFound // агент по 404 делает ретраи/выходит
+			status = http.StatusNotFound
 		}
 		http.Error(w, http.StatusText(status), status)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	// ВАЖНО: тело должно заканчиваться строкой с checksum (tail -n 1)
-	io.WriteString(w, sum+"\n")
+	_, _ = io.WriteString(w, sum+"\n")
 }
 
 // GET /controller/download-config/{uuid}/?key=...
 func (h *Handler) DownloadConfig(w http.ResponseWriter, r *http.Request) {
 	uuid := mux.Vars(r)["uuid"]
 	key := r.URL.Query().Get("key")
+
+	// Ленивый reconcile (best-effort)
+	if h.rec != nil {
+		_, _, _ = h.rec.Reconcile(r.Context(), uuid)
+	}
+
 	data, sum, err := h.ds.GetConfig(r.Context(), uuid, key)
 	if err != nil {
 		status := http.StatusInternalServerError
