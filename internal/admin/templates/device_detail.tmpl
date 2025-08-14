@@ -1,0 +1,64 @@
+{{define "device_detail.tmpl"}}{{template "layout" .}}{{end}}
+
+{{define "content"}}
+<h1>Device</h1>
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Overview</h3>
+    <div class="mono small">UUID: {{.Dev.UUID}}</div>
+    <div>Name: <b>{{.Dev.Name}}</b></div>
+    <div>MAC: <span class="mono">{{.Dev.MAC}}</span></div>
+    <div>Status: {{.Dev.Status}} · LastSeen: {{.Dev.LastSeenAt}}</div>
+    <div>Config: v{{.Dev.ConfigVersion}} · checksum <span class="mono">{{.Dev.ConfigChecksum}}</span></div>
+    <div style="margin-top:10px">
+      <button class="btn btn-primary" onclick="reconcile()">Reconcile Now</button>
+      <a class="btn" href="/admin/devices/{{.Dev.UUID}}/config/view">View Config</a>
+      <a class="btn" href="/controller/download-config/{{.Dev.UUID}}/?key={{.Dev.Key}}">Download tar.gz</a>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Device Secrets (HMAC)</h3>
+    <div class="small">Secret показывается <b>один раз</b>.</div>
+    <div style="margin-top:6px">
+      <button class="btn btn-primary" onclick="issueSecret()">Issue new secret</button>
+      <button class="btn btn-danger" onclick="revokeAll()">Revoke all</button>
+    </div>
+    <table style="margin-top:10px"><thead><tr><th>Key ID</th><th>Created</th><th>Revoked</th></tr></thead>
+    <tbody>
+      {{range .Secrets}}
+        <tr><td class="mono">{{.KeyID}}</td><td class="small">{{.CreatedAt}}</td><td>{{if .Revoked}}yes{{else}}no{{end}}</td></tr>
+      {{else}}
+        <tr><td colspan="3">No secrets</td></tr>
+      {{end}}
+    </tbody></table>
+    <pre id="secretBox" style="display:none"></pre>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h3>Templates</h3>
+  <div class="small">Применяются по возрастанию priority (низкий — раньше).</div>
+  <ul>
+    {{range .Templates}}<li>#{{.Priority}} — {{.Name}}</li>{{else}}<li>No templates</li>{{end}}
+  </ul>
+</div>
+
+<script>
+async function reconcile(){
+  const r = await postJSON('/admin/api/devices/{{.Dev.UUID}}/reconcile');
+  toast('checksum: '+r.checksum+(r.updated?' (updated)':' (no changes)'));
+  location.reload();
+}
+async function issueSecret(){
+  const r = await postJSON('/admin/api/devices/{{.Dev.UUID}}/secrets/issue');
+  const el = document.getElementById('secretBox');
+  el.style.display='block';
+  el.textContent = 'Key ID: '+r.key_id+'\nSecret (hex): '+r.secret+'\nSave now — will not be shown again.';
+}
+async function revokeAll(){
+  if(!confirm('Revoke all secrets?')) return;
+  await postJSON('/admin/api/devices/{{.Dev.UUID}}/secrets/revoke_all');
+  location.reload();
+}
+</script>
+{{end}}

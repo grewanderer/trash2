@@ -1,0 +1,28 @@
+{{define "devices_list.tmpl"}}{{template "layout" .}}{{end}}
+
+{{define "content"}}
+<h1>Devices</h1>
+<form method="get" class="grid cols-2" style="grid-template-columns:1fr auto">
+  <input name="q" placeholder="Search UUID, name, MAC" value="{{.Query}}">
+  <button class="btn">Search</button>
+</form>
+<div class="card" style="margin-top:10px">
+<table>
+  <thead><tr><th>UUID</th><th>Name</th><th>MAC</th><th>Status</th><th>Version</th><th>Updated</th></tr></thead>
+  <tbody>
+  {{range .Rows}}
+    <tr>
+      <td class="mono"><a href="/admin/devices/{{.UUID}}">{{.UUID}}</a></td>
+      <td>{{.Name}}</td>
+      <td class="mono">{{.MAC}}</td>
+      <td>{{.Status}}</td>
+      <td>{{.ConfigVersion}}</td>
+      <td class="small">{{.UpdatedAt}}</td>
+    </tr>
+  {{else}}
+    <tr><td colspan="6">No devices</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{end}}

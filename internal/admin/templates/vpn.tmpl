@@ -1,0 +1,28 @@
+{{define "vpn.tmpl"}}{{template "layout" .}}{{end}}
+
+{{define "content"}}
+<h1>Mgmt VPN (read-only)</h1>
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Mode</h3>
+    <div class="mono">{{.Cfg.Mode}}</div>
+  </div>
+  <div class="card">
+    <h3>WireGuard</h3>
+    <div class="mono">Endpoint: {{.Cfg.WireGuard.Endpoint}}</div>
+    <div class="mono">ServerPub: {{.Cfg.WireGuard.ServerPublicKey}}</div>
+    <div class="mono">Pool: {{.Cfg.WireGuard.AddressPoolCIDR}}</div>
+  </div>
+  <div class="card">
+    <h3>OpenVPN</h3>
+    <div class="mono">{{.Cfg.OpenVPN.Remote}}:{{.Cfg.OpenVPN.Port}}/{{.Cfg.OpenVPN.Proto}}</div>
+  </div>
+  <div class="card">
+    <h3>ZeroTier</h3>
+    <div class="mono">NetworkID: {{.Cfg.ZeroTier.NetworkID}}</div>
+  </div>
+</div>
+<div class="small" style="margin-top:10px">
+  Настройки берутся из конфиг-файла приложения и применяются в Reconcile.
+</div>
+{{end}}

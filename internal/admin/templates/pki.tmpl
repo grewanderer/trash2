@@ -1,0 +1,18 @@
+{{define "pki.tmpl"}}{{template "layout" .}}{{end}}
+
+{{define "content"}}
+<h1>PKI</h1>
+<div class="card">
+  {{if .CA}}
+    <div><b>Root CA:</b> {{.CA.Name}}</div>
+    <div class="small">Valid: {{.CA.NotBefore}} — {{.CA.NotAfter}}</div>
+    <div style="margin-top:10px">
+      <details><summary>CA Certificate (PEM)</summary>
+      <pre class="mono">{{printf "%s" .CA.CertPEM}}</pre>
+      </details>
+    </div>
+  {{else}}
+    <div>No CA yet — создастся автоматически при первом OpenVPN reconcile.</div>
+  {{end}}
+</div>
+{{end}}

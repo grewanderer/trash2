@@ -16,22 +16,23 @@ const (
 )
 
 type Device struct {
-	ID              uint           `gorm:"primaryKey"`
-	UUID            string         `gorm:"type:uuid;uniqueIndex;not null"`
-	Name            string         `gorm:"type:text"`
-	OrgID           *uint          `gorm:"index"`
-	Model           string         `gorm:"type:text"`
-	MAC             string         `gorm:"type:text"`
+	ID    uint   `gorm:"primaryKey"`
+	UUID  string `gorm:"type:char(36);uniqueIndex;not null"` // ← было type:uuid
+	Name  string `gorm:"type:text"`
+	OrgID *uint  `gorm:"index"`
+	Model string `gorm:"type:text"`
+	MAC   string `gorm:"type:text"`
+
 	Fingerprint     string         `gorm:"type:text"`
-	Tags            datatypes.JSON `gorm:"type:jsonb"`
+	Tags            datatypes.JSON `gorm:"type:json"`
 	Status          DeviceStatus   `gorm:"type:text;default:'unknown'"`
 	LastSeenAt      *time.Time
-	ConfigArchive   []byte         `gorm:"type:bytea"`
-	Key             string         `gorm:"type:char(32);index"`
+	ConfigArchive   []byte         // ← убрали gorm:"type:bytea" (MySQL не знает bytea)
+	Key             string         `gorm:"column:device_key;type:char(32);index"`
 	ConfigVersion   int            `gorm:"default:0"`
 	ConfigChecksum  string         `gorm:"type:text"`
-	DesiredConfig   datatypes.JSON `gorm:"type:jsonb"`
-	RenderedConfig  datatypes.JSON `gorm:"type:jsonb"`
+	DesiredConfig   datatypes.JSON `gorm:"type:json"`
+	RenderedConfig  datatypes.JSON `gorm:"type:json"`
 	ConfigUpdatedAt *time.Time
 
 	CreatedAt time.Time

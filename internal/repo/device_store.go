@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,78 +44,90 @@ type RegisterResult struct {
 
 // -------- Register (для /controller/register/) --------
 func (s *DeviceStore) Register(ctx context.Context, in RegisterInput) (*RegisterResult, error) {
-	if in.ExpectedSecret == "" || in.SharedSecret != in.ExpectedSecret {
+	// 1) проверяем shared secret
+	if strings.TrimSpace(in.ExpectedSecret) != "" && in.SharedSecret != in.ExpectedSecret {
 		return nil, ErrBadSecret
 	}
 
-	// вычисляем key
-	key := in.KeyOptional
-	if key == "" && in.ConsistentKey && in.MAC != "" {
-		h := md5.Sum([]byte(in.MAC + "+" + in.SharedSecret))
-		key = hex.EncodeToString(h[:])
-	}
+	// 2) вычисляем/берём key
+	key := strings.TrimSpace(in.KeyOptional)
 	if key == "" {
-		r := uuid.New().String()
-		h := md5.Sum([]byte(r))
-		key = hex.EncodeToString(h[:])
+		if in.ConsistentKey && in.MAC != "" && in.ExpectedSecret != "" {
+			h := md5.Sum([]byte(strings.ToLower(in.MAC) + in.ExpectedSecret))
+			key = hex.EncodeToString(h[:]) // совместимо с openwisp-consistent-key
+		} else {
+			// случайный 16-байтовый hex (32 символа)
+			u := uuid.New()
+			h := md5.Sum([]byte(u.String()))
+			key = hex.EncodeToString(h[:])
+		}
 	}
 
-	tx := s.db.WithContext(ctx)
-	var dev models.Device
-	err := tx.Where("key = ?", key).First(&dev).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		u := uuid.New().String()
-		now := time.Now().UTC()
-		dev = models.Device{
-			UUID:       u,
-			Name:       in.Name,
-			Model:      in.Model,
-			MAC:        in.MAC,
-			Key:        key,
-			Status:     models.DeviceStatusOnline,
-			LastSeenAt: &now,
+	// 3) если устройство уже есть по key — вернём его (STRUCT Where: `devices`.`key`)
+	var existing models.Device
+	err := s.db.WithContext(ctx).Where(&models.Device{Key: key}).First(&existing).Error
+	if err == nil {
+		// обновим метаданные "по дороге"
+		changed := false
+		if in.Name != "" && existing.Name != in.Name {
+			existing.Name = in.Name
+			changed = true
 		}
-		if err := tx.Create(&dev).Error; err != nil {
-			return nil, err
+		if in.Model != "" && existing.Model != in.Model {
+			existing.Model = in.Model
+			changed = true
 		}
-		return &RegisterResult{UUID: dev.UUID, Key: dev.Key, Name: dev.Name, IsNew: true}, nil
+		if in.MAC != "" && existing.MAC != in.MAC {
+			existing.MAC = in.MAC
+			changed = true
+		}
+		if changed {
+			_ = s.db.WithContext(ctx).Save(&existing).Error
+		}
+		return &RegisterResult{
+			UUID:  existing.UUID,
+			Key:   existing.Key,
+			Name:  existing.Name,
+			IsNew: false,
+		}, nil
 	}
-	if err != nil {
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 
-	// обновление существующего
-	updates := map[string]any{}
-	if in.Name != "" && in.Name != dev.Name {
-		updates["name"] = in.Name
-	}
-	if in.Model != "" && in.Model != dev.Model {
-		updates["model"] = in.Model
-	}
-	if len(updates) > 0 {
-		if err := tx.Model(&dev).Updates(updates).Error; err != nil {
-			return nil, err
-		}
+	// 4) создаём новое устройство
+	d := models.Device{
+		UUID:   uuid.NewString(),
+		Name:   in.Name,
+		Model:  in.Model,
+		MAC:    in.MAC,
+		Key:    key,
+		Status: models.DeviceStatusUnknown,
 	}
 	now := time.Now().UTC()
-	dev.Status = models.DeviceStatusOnline
-	dev.LastSeenAt = &now
-	_ = tx.Save(&dev).Error
+	d.CreatedAt = now
+	d.UpdatedAt = now
 
-	return &RegisterResult{UUID: dev.UUID, Key: dev.Key, Name: dev.Name, IsNew: false}, nil
+	if err := s.db.WithContext(ctx).Create(&d).Error; err != nil {
+		return nil, err
+	}
+	return &RegisterResult{
+		UUID:  d.UUID,
+		Key:   d.Key,
+		Name:  d.Name,
+		IsNew: true,
+	}, nil
 }
 
 // -------- Агентские методы (uuid+key) уже есть --------
 
 func (s *DeviceStore) ValidateKey(ctx context.Context, uuid, key string) (*models.Device, error) {
 	var d models.Device
-	if err := s.db.WithContext(ctx).Where("uuid=? AND key=?", uuid, key).First(&d).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrUnauthorized
-		}
-		return nil, err
+	err := s.db.WithContext(ctx).Where(&models.Device{UUID: uuid, Key: key}).First(&d).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrUnauthorized
 	}
-	return &d, nil
+	return &d, err
 }
 
 func (s *DeviceStore) GetChecksum(ctx context.Context, uuid, key string) (string, error) {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"wisp/config"
+	"wisp/internal/admin"
 	"wisp/internal/controller"
 	"wisp/internal/db"
 	"wisp/internal/health"
@@ -22,6 +23,7 @@ import (
 	"wisp/internal/owctrl"
 	"wisp/internal/pki"
 	"wisp/internal/repo"
+	"wisp/internal/secrets"
 
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
@@ -68,11 +70,9 @@ func (a *App) Initialize(cfg *config.Config) {
 	p := owctrl.NewMemKeyProvider(10 * time.Minute)
 	ds := repo.NewDeviceStore(a.db)
 	ts := repo.NewTemplateStore(a.db)
-	pkiStore := repo.NewPKIStore(a.db)
-	pkiSvc := pki.New(pkiStore)
-
-	rec := controller.NewReconciler(ds, ts, pkiSvc, a.cfg)
-	ow := owagent.New(ds, a.cfg.OpenWISP.SharedSecret, true, rec)
+	pkis := pki.New(repo.NewPKIStore(a.db)) // ← ЭТО pkis
+	rec := controller.NewReconciler(ds, ts, pkis, a.cfg)
+	sec := secrets.New(repo.NewSecretStore(a.db)) // ← ЭТО sec
 
 	/* 3) Router + middleware */
 	a.Router = mux.NewRouter().StrictSlash(true)
@@ -82,6 +82,10 @@ func (a *App) Initialize(cfg *config.Config) {
 		middleware.LoggerMW,
 	)
 
+	// Owagent handlers
+	ow := owagent.New(ds, a.cfg.OpenWISP.SharedSecret, true, rec)
+	owagent.RegisterRoutes(a.Router, ow)
+
 	/* 4) Health */
 	if a.db != nil {
 		health.RegisterRoutesWithDB(a.Router, a.db) // /healthz, /readyz
@@ -89,7 +93,10 @@ func (a *App) Initialize(cfg *config.Config) {
 		health.RegisterRoutes(a.Router) // только /healthz
 	}
 
-	owagent.RegisterRoutes(a.Router, ow)
+	// === ADMIN UI ===
+	admin.Attach(a.Router, admin.Dependencies{
+		DB: a.db, DS: ds, TS: ts, PKI: pkis, REC: rec, SECRETS: sec, CFG: a.cfg,
+	})
 
 	/* 5) OpenWISP controller */
 	if a.db != nil {

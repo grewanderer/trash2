@@ -1,0 +1,22 @@
+{{define "device_config.tmpl"}}{{template "layout" .}}{{end}}
+
+{{define "content"}}
+<h1>Config tarball for {{.Dev.UUID}}</h1>
+<div class="card">
+  <div>Version: <b>{{.Version}}</b></div>
+  <div>Checksum: <span class="mono">{{.Checksum}}</span></div>
+</div>
+<div class="card" style="margin-top:10px">
+  <h3>Files</h3>
+  <table><thead><tr><th>Path</th><th>Size</th></tr></thead><tbody>
+    {{range .Files}}
+      <tr><td class="mono">{{.Name}}</td><td class="small">{{.Size}}</td></tr>
+    {{else}}
+      <tr><td colspan="2">Tarball empty or not built yet</td></tr>
+    {{end}}
+  </tbody></table>
+</div>
+<div style="margin-top:10px">
+  <a class="btn" href="/controller/download-config/{{.Dev.UUID}}/?key={{.Dev.Key}}">Download tar.gz</a>
+</div>
+{{end}}

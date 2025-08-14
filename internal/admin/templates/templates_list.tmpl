@@ -1,0 +1,26 @@
+{{define "templates_list.tmpl"}}{{template "layout" .}}{{end}}
+
+{{define "content"}}
+<h1>Templates</h1>
+<div style="margin-bottom:10px">
+  <a class="btn btn-primary" href="/admin/templates/new">New Template</a>
+</div>
+<div class="card">
+<table>
+  <thead><tr><th>ID</th><th>Priority</th><th>Name</th><th>Updated</th><th></th></tr></thead>
+  <tbody>
+  {{range .Rows}}
+    <tr>
+      <td>{{.ID}}</td>
+      <td>{{.Priority}}</td>
+      <td>{{.Name}}</td>
+      <td class="small">{{.UpdatedAt}}</td>
+      <td><a class="btn" href="/admin/templates/{{.ID}}/edit">Edit</a></td>
+    </tr>
+  {{else}}
+    <tr><td colspan="5">No templates</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{end}}

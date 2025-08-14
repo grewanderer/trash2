@@ -1,0 +1,30 @@
+{{define "template_edit.tmpl"}}{{template "layout" .}}{{end}}
+
+{{define "content"}}
+<h1>{{if .IsNew}}New Template{{else}}Edit Template{{end}}</h1>
+<div class="card">
+  <form method="post" action="{{if .IsNew}}/admin/api/templates{{else}}/admin/api/templates/{{.Tpl.ID}}{{end}}">
+    <div class="grid cols-2">
+      <div>
+        <label>Name</label>
+        <input name="name" value="{{.Tpl.Name}}" required>
+      </div>
+      <div>
+        <label>Priority (lower applies first)</label>
+        <input name="priority" value="{{if .Tpl.Priority}}{{.Tpl.Priority}}{{else}}100{{end}}">
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <label>NetJSON</label>
+      <textarea name="netjson" rows="18" class="mono">{{printf "%s" .Tpl.NetJSON}}</textarea>
+    </div>
+    <div style="margin-top:10px">
+      <button class="btn btn-primary" type="submit">{{if .IsNew}}Create{{else}}Save{{end}}</button>
+      {{if not .IsNew}}
+      <button class="btn btn-danger" formaction="/admin/api/templates/{{.Tpl.ID}}/delete" formmethod="post">Delete</button>
+      {{end}}
+      <a class="btn" href="/admin/templates">Back</a>
+    </div>
+  </form>
+</div>
+{{end}}

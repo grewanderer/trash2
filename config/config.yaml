@@ -13,16 +13,31 @@ database:
   driver: "mysql"
   dsn:  "root@tcp(127.0.0.1:3306)/owgo?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&loc=Local"
 
-  global_vars:
-  timezone: "Europe/Rome"
-  ntp1: "pool.ntp.org"
-  dns1: "1.1.1.1"
-  
-
 openwisp:
-  # Секрет для регистрации агента openwisp-config (должен совпадать на устройстве).
-  # ОБЯЗАТЕЛЬНО замените!
-  shared_secret: "my_shared_secret"
+  # секрет для OpenWISP API, который будет использоваться для подписи запросов
+  # и проверки подписи ответов
+  # можно сгенерировать с помощью openssl rand -base64 32
+  shared_secret: "dev_secret"
+  controller:
+    pki:
+      ca_name: "OpenWISP-Go-CA"
+      cert_ttl: "8760h"         # 1 год
+    mgmtVPN:
+      mode: "none"             # "wireguard"|"openvpn"|"zerotier"|"none"
+      wireguard:
+        endpoint: "vpn.example.com:51820"
+        server_public_key: "SERVER_PUB_KEY"
+        address_pool_cidr: "10.10.0.0/24"
+        allowed_ips: ["10.10.0.0/24"]
+        keepalive: 25
+      openvpn:
+        remote: "vpn.example.com"
+        port: 1194
+        proto: "udp"
+        cipher: "AES-256-GCM"
+        auth: "SHA256"
+      zeroTier:
+        networkid: "8056c2e21c000001"
 
 controller:
   # место, где позже будут лежать шаблоны конфигураций (если выберем файловый бэкенд)
