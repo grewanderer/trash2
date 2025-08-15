@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"wisp/internal/models"
 )
@@ -44,79 +45,84 @@ type RegisterResult struct {
 
 // -------- Register (для /controller/register/) --------
 func (s *DeviceStore) Register(ctx context.Context, in RegisterInput) (*RegisterResult, error) {
-	// 1) проверяем shared secret
-	if strings.TrimSpace(in.ExpectedSecret) != "" && in.SharedSecret != in.ExpectedSecret {
+	// 1) shared secret (если в конфиге задан)
+	if sec := strings.TrimSpace(in.ExpectedSecret); sec != "" && in.SharedSecret != sec {
 		return nil, ErrBadSecret
 	}
 
-	// 2) вычисляем/берём key
+	// нормализуем MAC (для consistent key)
+	mac := strings.ToLower(strings.TrimSpace(in.MAC))
+
+	// 2) выбрать/сгенерировать key
 	key := strings.TrimSpace(in.KeyOptional)
 	if key == "" {
-		if in.ConsistentKey && in.MAC != "" && in.ExpectedSecret != "" {
-			h := md5.Sum([]byte(strings.ToLower(in.MAC) + in.ExpectedSecret))
-			key = hex.EncodeToString(h[:]) // совместимо с openwisp-consistent-key
+		if in.ConsistentKey && mac != "" && in.ExpectedSecret != "" {
+			sum := md5.Sum([]byte(mac + in.ExpectedSecret)) // совместимо с openwisp-consistent-key
+			key = hex.EncodeToString(sum[:])
 		} else {
-			// случайный 16-байтовый hex (32 символа)
-			u := uuid.New()
-			h := md5.Sum([]byte(u.String()))
-			key = hex.EncodeToString(h[:])
+			sum := md5.Sum([]byte(uuid.NewString()))
+			key = hex.EncodeToString(sum[:]) // 32 hex
 		}
 	}
 
-	// 3) если устройство уже есть по key — вернём его (STRUCT Where: `devices`.`key`)
-	var existing models.Device
-	err := s.db.WithContext(ctx).Where(&models.Device{Key: key}).First(&existing).Error
-	if err == nil {
-		// обновим метаданные "по дороге"
-		changed := false
-		if in.Name != "" && existing.Name != in.Name {
-			existing.Name = in.Name
-			changed = true
-		}
-		if in.Model != "" && existing.Model != in.Model {
-			existing.Model = in.Model
-			changed = true
-		}
-		if in.MAC != "" && existing.MAC != in.MAC {
-			existing.MAC = in.MAC
-			changed = true
-		}
-		if changed {
-			_ = s.db.WithContext(ctx).Save(&existing).Error
-		}
-		return &RegisterResult{
-			UUID:  existing.UUID,
-			Key:   existing.Key,
-			Name:  existing.Name,
-			IsNew: false,
-		}, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
-	// 4) создаём новое устройство
-	d := models.Device{
-		UUID:   uuid.NewString(),
-		Name:   in.Name,
-		Model:  in.Model,
-		MAC:    in.MAC,
-		Key:    key,
-		Status: models.DeviceStatusUnknown,
-	}
 	now := time.Now().UTC()
-	d.CreatedAt = now
-	d.UpdatedAt = now
 
-	if err := s.db.WithContext(ctx).Create(&d).Error; err != nil {
+	// 3) быстрый путь: устройство уже существует по key
+	var d models.Device
+	if err := s.db.WithContext(ctx).
+		Where("device_key = ?", key). // ВАЖНО: колонка, а не reserved word KEY
+		First(&d).Error; err == nil {
+
+		updates := map[string]any{}
+		if n := strings.TrimSpace(in.Name); n != "" && d.Name != n {
+			updates["name"] = n
+		}
+		if m := strings.TrimSpace(in.Model); m != "" && d.Model != m {
+			updates["model"] = m
+		}
+		if mac != "" && d.MAC != mac {
+			updates["mac"] = mac
+		}
+		if len(updates) > 0 {
+			updates["updated_at"] = now
+			_ = s.db.WithContext(ctx).Model(&d).Updates(updates).Error
+		}
+		return &RegisterResult{UUID: d.UUID, Key: d.Key, Name: d.Name, IsNew: false}, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	return &RegisterResult{
-		UUID:  d.UUID,
-		Key:   d.Key,
-		Name:  d.Name,
-		IsNew: true,
-	}, nil
+
+	// 4) создать новое устройство (идемпотентно на случай гонки)
+	d = models.Device{
+		UUID:      uuid.NewString(),
+		Name:      strings.TrimSpace(in.Name),
+		Model:     strings.TrimSpace(in.Model),
+		MAC:       mac,
+		Key:       key, // поле модели должно быть с тегом: gorm:"column:device_key;uniqueIndex"
+		Status:    models.DeviceStatusUnknown,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	// ON CONFLICT (device_key) DO NOTHING → если уже кто-то успел создать — просто перечитаем
+	if err := s.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "device_key"}},
+			DoNothing: true,
+		}).
+		Create(&d).Error; err != nil {
+		return nil, err
+	}
+
+	// Если был конфликт — загрузим созданную ранее запись и вернём её
+	if d.ID == 0 {
+		if err := s.db.WithContext(ctx).Where("device_key = ?", key).First(&d).Error; err != nil {
+			return nil, err
+		}
+		return &RegisterResult{UUID: d.UUID, Key: d.Key, Name: d.Name, IsNew: false}, nil
+	}
+
+	return &RegisterResult{UUID: d.UUID, Key: d.Key, Name: d.Name, IsNew: true}, nil
 }
 
 // -------- Агентские методы (uuid+key) уже есть --------

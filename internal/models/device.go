@@ -23,12 +23,13 @@ type Device struct {
 	Model string `gorm:"type:text"`
 	MAC   string `gorm:"type:text"`
 
-	Fingerprint        string         `gorm:"type:text"`
-	Tags               datatypes.JSON `gorm:"type:json"`
-	Status             DeviceStatus   `gorm:"type:text;default:'unknown'"`
-	LastSeenAt         *time.Time
-	ConfigArchive      []byte         // ← убрали gorm:"type:bytea" (MySQL не знает bytea)
-	Key                string         `gorm:"column:device_key;type:char(32);index"`
+	Fingerprint   string         `gorm:"type:text"`
+	Tags          datatypes.JSON `gorm:"type:json"`
+	Status        DeviceStatus   `gorm:"type:text;default:'unknown'"`
+	LastSeenAt    *time.Time
+	ConfigArchive []byte // ← убрали gorm:"type:bytea" (MySQL не знает bytea)
+	Key           string `gorm:"column:device_key;uniqueIndex"` // НЕ "key"
+
 	ConfigVersion      int            `gorm:"default:0"`
 	ConfigChecksum     string         `gorm:"type:text"`
 	DesiredConfig      datatypes.JSON `gorm:"type:json"`

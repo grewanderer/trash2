@@ -95,7 +95,7 @@ func (a *App) Initialize(cfg *config.Config) {
 	)
 
 	// Owagent handlers
-	ow := owagent.New(ds, a.cfg.OpenWISP.SharedSecret, true, rec)
+	ow := owagent.New(ds, a.cfg.OpenWISP.SharedSecret, false, rec)
 	owagent.RegisterRoutes(a.Router, ow)
 
 	/* 4) Health */

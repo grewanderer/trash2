@@ -43,7 +43,7 @@ func setOWHeader(w http.ResponseWriter) {
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	setOWHeader(w)
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "error: bad form", http.StatusBadRequest)
+		http.Error(w, "bad form", 400)
 		return
 	}
 	in := repo.RegisterInput{
@@ -95,12 +95,10 @@ func (h *Handler) Checksum(w http.ResponseWriter, r *http.Request) {
 
 	sum, err := h.ds.GetChecksum(r.Context(), uuid, key)
 	if err != nil {
-		// различаем NotFound и Unauthorized
 		code := http.StatusInternalServerError
-		if errors.Is(err, repo.ErrNotFound) {
-			code = http.StatusNotFound // заставит агента регистрироваться
-		} else if errors.Is(err, repo.ErrUnauthorized) {
-			code = http.StatusNotFound // для агента тоже 404, чтобы уйти в register
+		switch {
+		case errors.Is(err, repo.ErrUnauthorized), errors.Is(err, repo.ErrNotFound):
+			code = http.StatusNotFound // важно: 404 → agent re-register
 		}
 		http.Error(w, http.StatusText(code), code)
 		return
@@ -112,18 +110,21 @@ func (h *Handler) Checksum(w http.ResponseWriter, r *http.Request) {
 
 // GET /controller/download-config/{uuid}/?key=...
 func (h *Handler) DownloadConfig(w http.ResponseWriter, r *http.Request) {
+	setOWHeader(w) // ← ПЕРВЫМ ДЕЛОМ (до любых return)
+
 	uuid := mux.Vars(r)["uuid"]
 	key := r.URL.Query().Get("key")
+
 	data, sum, err := h.ds.GetConfig(r.Context(), uuid, key)
 	if err != nil {
 		status := http.StatusInternalServerError
-		if err == repo.ErrUnauthorized || err == repo.ErrNotFound {
-			status = http.StatusNotFound
+		if errors.Is(err, repo.ErrUnauthorized) || errors.Is(err, repo.ErrNotFound) {
+			status = http.StatusNotFound // 404 → агент пойдёт на register
 		}
 		http.Error(w, http.StatusText(status), status)
 		return
 	}
-	setOWHeader(w)
+
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s.tar.gz"`, uuid, sum[:8]))
 	if r.Method == http.MethodHead {
@@ -132,7 +133,7 @@ func (h *Handler) DownloadConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
-	_ = h.ds.MarkSeen(r.Context(), uuid) // пульс online
+	_ = h.ds.MarkSeen(r.Context(), uuid)
 }
 
 // POST /controller/report-status/{uuid}/  body: key=...&status=running|error
